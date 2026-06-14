@@ -5,12 +5,15 @@ const wss = new WebSocketServer({ port: port });
 
 let clients = [];
 let globalVariables = [];
-let serverVariables = {}; // Format: { "Room1": ["Score", "Timer"] }
+let serverVariables = {}; // Format: { "Room1": ["Score"] }
+
+// Memory caches to save data for late-joiners
+let lastGlobalData = "";
+let serverDataCache = {}; // Format: { "Room1": "Latest Room Message" }
 
 function broadcastState() {
     const globalUsers = clients.map(c => c.username);
     
-    // Dynamically calculate active servers based on connected rooms + rooms holding variables
     const activeServers = Array.from(new Set([
         ...clients.map(c => c.server).filter(s => s !== ""),
         ...Object.keys(serverVariables)
@@ -19,6 +22,7 @@ function broadcastState() {
     clients.forEach(client => {
         const serverUsers = clients.filter(c => c.server === client.server && client.server !== "").map(c => c.username);
         const currentServerVars = (client.server && serverVariables[client.server]) ? serverVariables[client.server] : [];
+        const currentServerData = (client.server && serverDataCache[client.server]) ? serverDataCache[client.server] : "";
         
         if (client.ws.readyState === 1) { // 1 = OPEN
             client.ws.send(JSON.stringify({
@@ -27,7 +31,9 @@ function broadcastState() {
                 serverUsers: serverUsers,
                 globalVars: globalVariables,
                 serverVars: currentServerVars,
-                servers: activeServers
+                servers: activeServers,
+                globalData: lastGlobalData,      // Instantly populates on connect
+                serverData: currentServerData    // Instantly populates on room switch
             }));
         }
     });
@@ -39,7 +45,6 @@ wss.on('connection', function connection(ws) {
 
     ws.on('message', function message(data) {
         try {
-            // FIX: Explicitly convert binary Buffer to a string before parsing JSON
             const msg = JSON.parse(data.toString());
 
             if (msg.type === 'setUsername') {
@@ -55,16 +60,20 @@ wss.on('connection', function connection(ws) {
                 broadcastState();
             }
             else if (msg.type === 'sendGlobal') {
+                lastGlobalData = msg.data; // Save to global cache
                 clients.forEach(c => {
                     if (c.ws.readyState === 1) c.ws.send(JSON.stringify({ type: 'globalData', data: msg.data }));
                 });
+                broadcastState();
             }
             else if (msg.type === 'sendServer') {
+                serverDataCache[msg.server] = msg.data; // Save to room cache
                 clients.forEach(c => {
                     if (c.server === msg.server && c.ws.readyState === 1) {
                         c.ws.send(JSON.stringify({ type: 'serverData', data: msg.data }));
                     }
                 });
+                broadcastState();
             }
             else if (msg.type === 'createGlobalVar') {
                 if (!globalVariables.includes(msg.name)) {

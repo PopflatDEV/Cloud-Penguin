@@ -3,9 +3,7 @@ const { WebSocketServer } = require('ws');
 
 const port = process.env.PORT || 8080;
 
-// --- RENDER ENVIRONMENT CONTROLS ---
-// Set these in Render Dashboard -> Environment
-const ALLOWED_PROJECT_URL = process.env.ALLOWED_PROJECT_URL || "https://projects.penguinmod.com";
+const ALLOWED_PROJECT_URL = process.env.ALLOWED_PROJECT_URL || "https://studio.penguinmod.com";
 const ALLOW_EDITOR_UPDATES = process.env.ALLOW_EDITOR_UPDATES === "true";
 
 let globalVariables = [];
@@ -26,17 +24,13 @@ server.on('upgrade', (request, socket, head) => {
     const referer = request.headers.referer || "";
     const fullSource = referer || origin;
 
-    // 1. Check if it came from your exact published project URL
     const isFromProject = fullSource.startsWith(ALLOWED_PROJECT_URL);
-    
-    // 2. Check if it came from the editor (only allowed if enabled in Render)
     const isFromEditor = ALLOW_EDITOR_UPDATES && (
         origin.includes("studio.penguinmod.com") || 
         fullSource.includes("editor.html")
     );
 
     if (!isFromProject && !isFromEditor) {
-        console.log(`Blocked connection. Origin: ${origin} | Referer: ${referer}`);
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
         socket.destroy();
         return;
@@ -47,7 +41,21 @@ server.on('upgrade', (request, socket, head) => {
     });
 });
 
+// Helper function to clean up servers that have 0 players in them
+function cleanupEmptyServers() {
+    const activeRooms = new Set(clients.map(c => c.server).filter(s => s !== ""));
+    
+    for (const serverName of Object.keys(serverVariables)) {
+        if (!activeRooms.has(serverName)) {
+            delete serverVariables[serverName];
+            delete serverDataCache[serverName];
+        }
+    }
+}
+
 function broadcastState() {
+    cleanupEmptyServers(); // Automatically clean up empty rooms before broadcasting
+
     const globalUsers = clients.map(c => c.username);
     const activeServers = Array.from(new Set([
         ...clients.map(c => c.server).filter(s => s !== ""),
@@ -95,7 +103,6 @@ wss.on('connection', (ws) => {
 
             if (!msg || typeof msg.type !== 'string') return;
 
-            // Rate limit (500ms)
             if (now - clientState.lastMessageTime < 500) {
                 clientState.violations++;
                 if (clientState.violations > 10) ws.close(1008, "Rate limit exceeded");
@@ -109,8 +116,10 @@ wss.on('connection', (ws) => {
             } else if (msg.type === 'joinServer' && typeof msg.server === 'string') {
                 clientState.server = msg.server.trim().substring(0, 25);
                 broadcastState();
-            } else if (msg.type === 'leaveServer') {
-                clientState.server = "";
+            } else if (msg.type === 'leaveServer' && typeof msg.server === 'string') {
+                if (clientState.server === msg.server) {
+                    clientState.server = "";
+                }
                 broadcastState();
             } else if (msg.type === 'sendGlobal' && typeof msg.data === 'string') {
                 const cleanData = msg.data.substring(0, 150);
@@ -130,7 +139,6 @@ wss.on('connection', (ws) => {
                 });
                 broadcastState();
             } else if (msg.type === 'adminManageVar') {
-                // Only popflat can manage variables (no keys required)
                 if (clientState.username.toLowerCase() !== 'popflat') {
                     ws.send(JSON.stringify({ type: 'securityError', error: 'Must be popflat to manage variables.' }));
                     return;
@@ -140,32 +148,26 @@ wss.on('connection', (ws) => {
                 if (!varName) return;
 
                 if (msg.scope === 'global') {
-                    if (msg.action === 'Create' && !globalVariables.includes(varName)) {
-                        globalVariables.push(varName);
-                        clients.forEach(c => {
-                            if (c.ws.readyState === 1) c.ws.send(JSON.stringify({ type: 'globalVarCreated', name: varName }));
-                        });
+                    if (msg.action === 'Create') {
+                        if (!globalVariables.includes(varName)) globalVariables.push(varName);
                     } else if (msg.action === 'Destroy') {
                         globalVariables = globalVariables.filter(v => v !== varName);
+                    } else if (msg.action === 'Set') {
+                        // Optional handling if you store variable values on server backend
                     }
                 } else if (msg.scope === 'server' && clientState.server) {
                     if (!serverVariables[clientState.server]) serverVariables[clientState.server] = [];
-                    if (msg.action === 'Create' && !serverVariables[clientState.server].includes(varName)) {
-                        serverVariables[clientState.server].push(varName);
-                        clients.forEach(c => {
-                            if (c.server === clientState.server && c.ws.readyState === 1) {
-                                c.ws.send(JSON.stringify({ type: 'serverVarCreated', name: varName }));
-                            }
-                        });
+                    if (msg.action === 'Create') {
+                        if (!serverVariables[clientState.server].includes(varName)) {
+                            serverVariables[clientState.server].push(varName);
+                        }
                     } else if (msg.action === 'Destroy') {
                         serverVariables[clientState.server] = serverVariables[clientState.server].filter(v => v !== varName);
                     }
                 }
                 broadcastState();
             }
-        } catch (err) {
-            // Ignore malformed packets
-        }
+        } catch (err) {}
     });
 
     ws.on('close', () => {

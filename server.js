@@ -68,7 +68,8 @@ function broadcastState() {
 
     const activeServers = Array.from(new Set([
         ...Object.keys(serversPlayerMap),
-        ...Object.keys(serverVariables)
+        ...Object.keys(serverVariables),
+        ...Object.keys(serverDescriptions)
     ]));
 
     clients.forEach(client => {
@@ -140,11 +141,13 @@ wss.on('connection', (ws) => {
                 }
                 const targetServer = msg.server.trim().substring(0, 25);
                 if (!targetServer) return;
-                
-                if (serverVariables[targetServer] !== undefined) {
-                    serverDescriptions[targetServer] = msg.description.trim().substring(0, 120);
-                    broadcastState();
+
+                if (!serverVariables[targetServer]) {
+                    serverVariables[targetServer] = {};
                 }
+                
+                serverDescriptions[targetServer] = msg.description.trim().substring(0, 120);
+                broadcastState();
             } else if (msg.type === 'sendGlobal' && typeof msg.data === 'string') {
                 const cleanData = msg.data.substring(0, 150);
                 lastGlobalData = cleanData;

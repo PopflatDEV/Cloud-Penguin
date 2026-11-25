@@ -133,14 +133,19 @@ wss.on('connection', (ws) => {
             } else if (msg.type === 'leaveServer') {
                 clientState.server = "";
                 broadcastState();
-            } else if (msg.type === 'setServerDescription' && typeof msg.description === 'string') {
-                if (!clientState.server) return;
+            } else if (msg.type === 'setServerDescription' && typeof msg.server === 'string' && typeof msg.description === 'string') {
                 if (clientState.username.toLowerCase() !== 'popflat') {
                     ws.send(JSON.stringify({ type: 'securityError', error: 'Must be popflat to set server description.' }));
                     return;
                 }
-                serverDescriptions[clientState.server] = msg.description.trim().substring(0, 120);
-                broadcastState();
+                const targetServer = msg.server.trim().substring(0, 25);
+                if (!targetServer) return;
+                
+                // Ensure the target server room is initialized if active
+                if (serverVariables[targetServer] !== undefined) {
+                    serverDescriptions[targetServer] = msg.description.trim().substring(0, 120);
+                    broadcastState();
+                }
             } else if (msg.type === 'sendGlobal' && typeof msg.data === 'string') {
                 const cleanData = msg.data.substring(0, 150);
                 lastGlobalData = cleanData;

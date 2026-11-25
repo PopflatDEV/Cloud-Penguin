@@ -8,7 +8,7 @@ const ALLOW_EDITOR_UPDATES = process.env.ALLOW_EDITOR_UPDATES === "true";
 
 let globalVariables = {};
 let serverVariables = {};
-let serverDescriptions = {}; // Stores { "Room1": "Welcome to Room 1!" }
+let serverDescriptions = {};
 let clients = [];
 let lastGlobalData = "";
 let serverDataCache = {};
@@ -141,7 +141,6 @@ wss.on('connection', (ws) => {
                 const targetServer = msg.server.trim().substring(0, 25);
                 if (!targetServer) return;
                 
-                // Ensure the target server room is initialized if active
                 if (serverVariables[targetServer] !== undefined) {
                     serverDescriptions[targetServer] = msg.description.trim().substring(0, 120);
                     broadcastState();

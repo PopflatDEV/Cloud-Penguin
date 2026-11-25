@@ -9,6 +9,8 @@ const ALLOW_EDITOR_UPDATES = process.env.ALLOW_EDITOR_UPDATES === "true";
 let globalVariables = {};
 let serverVariables = {};
 let serverDescriptions = {};
+let serverCreationTimes = {}; // Stores room creation timestamps
+let serverVisibility = {};   // Stores room visibility ("Public" or "Private")
 let clients = [];
 let lastGlobalData = "";
 let serverDataCache = {};
@@ -49,6 +51,8 @@ function cleanupEmptyServers() {
             delete serverVariables[serverName];
             delete serverDataCache[serverName];
             delete serverDescriptions[serverName];
+            delete serverCreationTimes[serverName];
+            delete serverVisibility[serverName];
         }
     }
 }
@@ -84,6 +88,8 @@ function broadcastState() {
                 serverUsers: serverUsers,
                 serversPlayerMap: serversPlayerMap,
                 serverDescriptions: serverDescriptions,
+                serverCreationTimes: serverCreationTimes,
+                serverVisibility: serverVisibility,
                 globalVars: globalVariables,
                 serverVars: currentServerVars,
                 servers: activeServers,
@@ -130,6 +136,12 @@ wss.on('connection', (ws) => {
                 if (serverDescriptions[clientState.server] === undefined) {
                     serverDescriptions[clientState.server] = "";
                 }
+                if (!serverCreationTimes[clientState.server]) {
+                    serverCreationTimes[clientState.server] = Date.now();
+                }
+                if (!serverVisibility[clientState.server]) {
+                    serverVisibility[clientState.server] = "Public";
+                }
                 broadcastState();
             } else if (msg.type === 'leaveServer') {
                 clientState.server = "";
@@ -144,9 +156,26 @@ wss.on('connection', (ws) => {
 
                 if (!serverVariables[targetServer]) {
                     serverVariables[targetServer] = {};
+                    serverCreationTimes[targetServer] = Date.now();
+                    serverVisibility[targetServer] = "Public";
                 }
                 
                 serverDescriptions[targetServer] = msg.description.trim().substring(0, 120);
+                broadcastState();
+            } else if (msg.type === 'setServerVisibility' && typeof msg.server === 'string' && typeof msg.visibility === 'string') {
+                if (clientState.username.toLowerCase() !== 'popflat') {
+                    ws.send(JSON.stringify({ type: 'securityError', error: 'Must be popflat to set server visibility.' }));
+                    return;
+                }
+                const targetServer = msg.server.trim().substring(0, 25);
+                const vis = msg.visibility.trim() === 'Private' ? 'Private' : 'Public';
+                if (!targetServer) return;
+
+                if (!serverVariables[targetServer]) {
+                    serverVariables[targetServer] = {};
+                    serverCreationTimes[targetServer] = Date.now();
+                }
+                serverVisibility[targetServer] = vis;
                 broadcastState();
             } else if (msg.type === 'sendGlobal' && typeof msg.data === 'string') {
                 const cleanData = msg.data.substring(0, 150);
@@ -187,7 +216,11 @@ wss.on('connection', (ws) => {
                         delete globalVariables[varName];
                     }
                 } else if (msg.scope === 'server' && clientState.server) {
-                    if (!serverVariables[clientState.server]) serverVariables[clientState.server] = {};
+                    if (!serverVariables[clientState.server]) {
+                        serverVariables[clientState.server] = {};
+                        serverCreationTimes[clientState.server] = Date.now();
+                        serverVisibility[clientState.server] = "Public";
+                    }
                     if (msg.action === 'Create' || msg.action === 'Set') {
                         serverVariables[clientState.server][varName] = varValue;
                         if (msg.action === 'Create') {

@@ -6,8 +6,9 @@ const port = process.env.PORT || 8080;
 const ALLOWED_PROJECT_URL = process.env.ALLOWED_PROJECT_URL || "https://studio.penguinmod.com";
 const ALLOW_EDITOR_UPDATES = process.env.ALLOW_EDITOR_UPDATES === "true";
 
-let globalVariables = {}; // Stores { "Score": "10" }
-let serverVariables = {}; // Stores { "Room1": { "Timer": "30" } }
+let globalVariables = {};
+let serverVariables = {};
+let serverDescriptions = {}; // Stores { "Room1": "Welcome to Room 1!" }
 let clients = [];
 let lastGlobalData = "";
 let serverDataCache = {};
@@ -47,6 +48,7 @@ function cleanupEmptyServers() {
         if (!activeRooms.has(serverName)) {
             delete serverVariables[serverName];
             delete serverDataCache[serverName];
+            delete serverDescriptions[serverName];
         }
     }
 }
@@ -56,7 +58,6 @@ function broadcastState() {
 
     const globalUsers = clients.map(c => c.username);
     
-    // Build a map of all servers and their active players: { "Room1": ["Player1", "Player2"] }
     const serversPlayerMap = {};
     clients.forEach(c => {
         if (c.server) {
@@ -80,7 +81,8 @@ function broadcastState() {
                 type: 'updateState',
                 globalUsers: globalUsers,
                 serverUsers: serverUsers,
-                serversPlayerMap: serversPlayerMap, // Sent to all clients so any server's players can be queried
+                serversPlayerMap: serversPlayerMap,
+                serverDescriptions: serverDescriptions,
                 globalVars: globalVariables,
                 serverVars: currentServerVars,
                 servers: activeServers,
@@ -124,9 +126,20 @@ wss.on('connection', (ws) => {
                 if (!serverVariables[clientState.server]) {
                     serverVariables[clientState.server] = {};
                 }
+                if (serverDescriptions[clientState.server] === undefined) {
+                    serverDescriptions[clientState.server] = "";
+                }
                 broadcastState();
             } else if (msg.type === 'leaveServer') {
                 clientState.server = "";
+                broadcastState();
+            } else if (msg.type === 'setServerDescription' && typeof msg.description === 'string') {
+                if (!clientState.server) return;
+                if (clientState.username.toLowerCase() !== 'popflat') {
+                    ws.send(JSON.stringify({ type: 'securityError', error: 'Must be popflat to set server description.' }));
+                    return;
+                }
+                serverDescriptions[clientState.server] = msg.description.trim().substring(0, 120);
                 broadcastState();
             } else if (msg.type === 'sendGlobal' && typeof msg.data === 'string') {
                 const cleanData = msg.data.substring(0, 150);

@@ -10,7 +10,7 @@ let globalVariables = {};
 let serverVariables = {};
 let serverDescriptions = {};
 let serverCreationTimes = {}; 
-let serverVisibility = {};   // Stores room visibility ("Public" or "Private")
+let serverVisibility = {};   
 let clients = [];
 let lastGlobalData = "";
 let serverDataCache = {};
@@ -48,11 +48,7 @@ function cleanupEmptyServers() {
     const activeRooms = new Set(clients.map(c => c.server).filter(s => s !== ""));
     for (const serverName of Object.keys(serverVariables)) {
         if (!activeRooms.has(serverName)) {
-            // When a server becomes empty, automatically set it to private (or clear it completely)
             serverVisibility[serverName] = "Private";
-            
-            // Optional: If you want to fully wipe empty servers, you can still delete them, 
-            // but keeping them marked as Private ensures status history remains if needed.
             delete serverVariables[serverName];
             delete serverDataCache[serverName];
             delete serverDescriptions[serverName];
@@ -143,12 +139,17 @@ wss.on('connection', (ws) => {
                 if (!serverCreationTimes[clientState.server]) {
                     serverCreationTimes[clientState.server] = Date.now();
                 }
-                
-                // Rule: When someone joins an empty/new server, automatically set it to Public (or keep custom state)
                 if (!serverVisibility[clientState.server]) {
                     serverVisibility[clientState.server] = "Public";
                 }
-                
+
+                // Instantly update description on join if provided and user is admin
+                if (typeof msg.description === 'string' && msg.description.trim() !== '') {
+                    if (clientState.username.toLowerCase() === 'popflat') {
+                        serverDescriptions[clientState.server] = msg.description.trim().substring(0, 120);
+                    }
+                }
+
                 broadcastState();
             } else if (msg.type === 'leaveServer') {
                 clientState.server = "";
